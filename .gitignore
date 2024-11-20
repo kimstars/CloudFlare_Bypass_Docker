@@ -1,0 +1,11 @@
+__pycache__
+.pyc
+env
+run.build
+run.dist
+run.onefile-build
+build
+output
+
+*.exe
+*.rar

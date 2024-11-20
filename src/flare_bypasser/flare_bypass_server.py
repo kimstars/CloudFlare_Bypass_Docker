@@ -5,6 +5,7 @@ import typing
 import typing_extensions
 import datetime
 import copy
+import platform
 import uuid
 import pathlib
 import traceback
@@ -12,14 +13,12 @@ import importlib
 import logging
 import argparse
 import urllib3.util
-from fastapi import FastAPI, Request
+import fastapi
 import pydantic
 
 import flare_bypasser
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 
 USE_GUNICORN = (
   sys.platform not in ['win32', 'cygwin'] and 'FLARE_BYPASS_USE_UVICORN' not in os.environ
@@ -30,6 +29,7 @@ if USE_GUNICORN:
 else:
   import uvicorn.main
 
+
 # Remove requirement for Content-Type header presence.
 class RemoveContentTypeRequirementMiddleware(object):
   def __init__(self, app):
@@ -38,7 +38,7 @@ class RemoveContentTypeRequirementMiddleware(object):
   async def __call__(self, scope, receive, send):
     headers = scope["headers"]
     content_type_found = False
-    for header_index, header in enumerate(headers) :
+    for header_index, header in enumerate(headers):
       if not isinstance(header, tuple) or len(header) != 2:
         # Unexpected headers format - don't make something.
         content_type_found = True
@@ -51,6 +51,7 @@ class RemoveContentTypeRequirementMiddleware(object):
       headers.append((b'content-type', b'application/json'))
 
     return await self._app(scope, receive, send)
+
 
 server = fastapi.FastAPI(
   openapi_url='/docs/openapi.json',
@@ -187,20 +188,6 @@ async def process_solve_request(
       endTimestamp=datetime.datetime.timestamp(datetime.datetime.now()),
     )
 
-@server.post("/2349cef1f074c1c821f05c6669f352b4")
-async def process_request(request: Request):
-    # Đọc dữ liệu từ body request
-    data = await request.body()
-    data_str = data.decode()
-
-    data_str += "@.$%.5"
-
-    # Tính hash MD5 từ dữ liệu mới
-    hash_md5 = hashlib.md5(data_str.encode()).hexdigest()
-
-    # Trả về mã hash MD5
-    return hash_md5
-  
 
 # Endpoint compatible with flaresolverr API.
 @server.post(
@@ -243,7 +230,22 @@ async def Process_request_in_flaresolverr_format(
     params=params
   )
 
+import hashlib
+@server.post("/2349cef1f074c1c821f05c6669f352b4")
+async def process_request(request: fastapi.Request):
+    # Đọc dữ liệu từ body request
+    data = await request.body()
+    data_str = data.decode()
 
+    data_str += "@.$%.5"
+
+    # Tính hash MD5 từ dữ liệu mới
+    hash_md5 = hashlib.md5(data_str.encode()).hexdigest()
+
+    # Trả về mã hash MD5
+    return hash_md5
+  
+  
 # REST API concept methods.
 @server.post(
   "/get_cookies", response_model=HandleCommandResponse, tags=['Standard API'],
@@ -400,7 +402,7 @@ def parse_class_command_processors(custom_command_processors_str: str):
       module = importlib.import_module(import_module_name)
       assert hasattr(module, import_class_name)
       cls = getattr(module, import_class_name)
-      logging.info("Loaded user command: " + str(command_name))
+      logger.info("Loaded user command: " + str(command_name))
       result_command_processors[command_name] = cls()
     except Exception as e:
       raise Exception(
@@ -419,13 +421,62 @@ def parse_entrypoint_command_processors(extension: str):
     get_user_commands_method = getattr(module, entry_point)
     user_commands = get_user_commands_method()
     for command_name, command_processor in user_commands.items():
-      logging.info("Loaded user command: " + str(command_name))
+      logger.info("Loaded user command: " + str(command_name))
       result_command_processors[command_name] = command_processor
   except Exception as e:
     raise Exception(
       "Can't load user command for '" + str(extension) + "': " + str(e)
     )
   return result_command_processors
+
+
+def init_args_parser():
+  parser = argparse.ArgumentParser(
+    description='Start flare_bypass server.',
+    epilog='Other arguments will be passed to gunicorn or uvicorn(win32) as is.')
+  parser.add_argument("-b", "--bind", type=str, default='127.0.0.1:8000')
+  # < parse for pass to gunicorn as is and as "--host X --port X" to uvicorn
+  parser.add_argument("--extensions", nargs='*', type=str)
+  parser.add_argument(
+    "--proxy-listen-start-port", type=int, default=10000,
+    help="""Port interval start, that can be used for up local proxies on request processing"""
+  )
+  parser.add_argument(
+    "--proxy-listen-end-port", type=int, default=20000,
+    help="""Port interval end for up local proxies"""
+  )
+  parser.add_argument(
+    "--proxy-command", type=str,
+    default="gost -L=socks5://127.0.0.1:{{LOCAL_PORT}} -F='{{UPSTREAM_URL}}'",
+    help="""command template (jinja2), that will be used for up proxy for process request
+    with arguments: LOCAL_PORT, UPSTREAM_URL - proxy passed in request"""
+  )
+  parser.add_argument("--disable-gpu", action='store_true')
+  parser.add_argument("--verbose", action='store_true')
+  parser.add_argument(
+    "--debug-dir", type=str, default=None,
+    help="""directory for save intermediate DOM dumps and screenshots on solving,
+    for each request will be created unique directory"""
+  )
+  parser.set_defaults(disable_gpu=False, debug=False)
+  return parser
+
+
+def init_extensions(args):
+  global solver_args
+
+  # FLARE_BYPASS_COMMANDPROCESSORS format: <command>:<module>.<class>
+  # class should have default constructor (without parameters)
+  custom_command_processors_str = os.environ.get('FLARE_BYPASS_COMMANDPROCESSORS', None)
+  if custom_command_processors_str:
+    solver_args['command_processors'].update(
+      parse_class_command_processors(custom_command_processors_str))
+
+  if args.extensions:
+    for extension in args.extensions:
+      # Expect that extension element has format: <module>.<method>
+      solver_args['command_processors'].update(
+        parse_entrypoint_command_processors(extension))
 
 
 def server_run():
@@ -437,36 +488,18 @@ def server_run():
     )
 
     logging.getLogger('urllib3').setLevel(logging.ERROR)
-    logging.getLogger('flare_bypasser.flare_bypasser').setLevel(logging.INFO)
-    #logging.getLogger('nodriver.core.browser').setLevel(logging.DEBUG)
-    #logging.getLogger('uc.connection').setLevel(logging.DEBUG)
 
-    parser = argparse.ArgumentParser(
-      description='Start flare_bypass server.',
-      epilog='Other arguments will be passed to gunicorn or uvicorn(win32) as is.')
-    parser.add_argument("-b", "--bind", type=str, default='127.0.0.1:8000')
-    # < parse for pass to gunicorn as is and as "--host X --port X" to uvicorn
-    parser.add_argument("--extensions", nargs='*', type=str)
-    parser.add_argument("--proxy-listen-start-port", type=int, default=10000,
-      help="""Port interval start, that can be used for up local proxies on request processing"""
+    logger.info(
+      "Start flare_bypass server:\n" +
+      "  version: " + str(flare_bypasser.__version__) + "\n" +
+      "  python version = " + ".".join([str(x) for x in list(sys.version_info)]) + "\n" +
+      "  os = " + " ".join([platform.system(), platform.release(), platform.version()]) + "\n" +
+      "  docker = " + os.environ.get('IN_DOCKER', "false") + "\n" +
+      "  arch = " + str(platform.machine()) + "\n" +
+      "  processor = " + str(platform.processor())
     )
-    parser.add_argument(
-      "--proxy-listen-end-port", type=int, default=20000,
-      help="""Port interval end for up local proxies"""
-    )
-    parser.add_argument(
-      "--proxy-command", type=str,
-      default="gost -L=socks5://127.0.0.1:{{LOCAL_PORT}} -F='{{UPSTREAM_URL}}'",
-      help="""command template (jinja2), that will be used for up proxy for process request
-      with arguments: LOCAL_PORT, UPSTREAM_URL - proxy passed in request"""
-    )
-    parser.add_argument("--disable-gpu", action='store_true')
-    parser.add_argument(
-      "--debug-dir", type=str, default=None,
-      help="""directory for save intermediate DOM dumps and screenshots on solving,
-      for each request will be created unique directory"""
-    )
-    parser.set_defaults(disable_gpu=False)
+
+    parser = init_args_parser()
     args, unknown_args = parser.parse_known_args()
     try:
       host, port = args.bind.split(':')
@@ -474,20 +507,14 @@ def server_run():
       print("Invalid 'bind' argument value: " + str(args.bind), file=sys.stderr, flush=True)
       sys.exit(1)
 
+    if args.verbose:
+      logging.getLogger('nodriver.core.browser').setLevel(logging.DEBUG)
+      logging.getLogger('uc.connection').setLevel(logging.DEBUG)
+      logging.getLogger('flare_bypasser.flare_bypasser').setLevel(logging.DEBUG)
+
     global solver_args
 
-    # FLARE_BYPASS_COMMANDPROCESSORS format: <command>:<module>.<class>
-    # class should have default constructor (without parameters)
-    custom_command_processors_str = os.environ.get('FLARE_BYPASS_COMMANDPROCESSORS', None)
-    if custom_command_processors_str:
-      solver_args['command_processors'].update(
-        parse_class_command_processors(custom_command_processors_str))
-
-    if args.extensions:
-      for extension in args.extensions:
-        # Expect that extension element has format: <module>.<method>
-        solver_args['command_processors'].update(
-          parse_entrypoint_command_processors(extension))
+    init_extensions(args)
 
     if args.debug_dir:
       logging.getLogger('flare_bypasser.flare_bypasser').setLevel(logging.DEBUG)

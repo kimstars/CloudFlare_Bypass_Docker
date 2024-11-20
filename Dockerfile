@@ -1,6 +1,6 @@
 ARG PYTHON_VERSION=3.11
 
-FROM python:${PYTHON_VERSION}-slim-bullseye AS builder
+FROM python:${PYTHON_VERSION}-slim-bookworm AS builder
 
 ARG CHROME_VERSION=""
 
@@ -30,8 +30,11 @@ COPY utils/linux_chrome_archive_installer.py ./linux_chrome_archive_installer.py
 COPY utils/linux_chrome_deb_repo_installer.sh ./linux_chrome_deb_repo_installer.sh
 
 # If CHROME_VERSION ins't defined obviously use tested version by platform.
+# TODO: for arm64 (mac m1) check: m.b. chromium 130 is available - in this case use equal versions for arm64,aarch64.
 RUN if [ "$CHROME_VERSION" = "" ] ; then \
-  if [ "$(arch)" != "x86_64" ] ; then echo 'CHROME_VERSION="120."' >>/tmp/build.env ; \
+  BUILD_ARCH="$(arch)" ; \
+  if [ "$BUILD_ARCH" = "arm64" ] ; then echo 'CHROME_VERSION="120."' >>/tmp/build.env ; \
+  elif [ "$BUILD_ARCH" = "aarch64" -o "$BUILD_ARCH" = "armv7l" ] ; then echo 'CHROME_VERSION="130."' >>/tmp/build.env ; \
   else echo 'CHROME_VERSION="131."' >>/tmp/build.env ; \
   fi ; \
   else echo 'CHROME_VERSION="'"$CHROME_VERSION"'"' >>/tmp/build.env ; \
@@ -55,7 +58,7 @@ RUN . /tmp/build.env ; if [ "$(arch)" != "x86_64" ] ; then \
   fi
 
 
-FROM python:${PYTHON_VERSION}-slim-bullseye
+FROM python:${PYTHON_VERSION}-slim-bookworm
 
 ARG UID=1111
 ARG GID=0
@@ -67,6 +70,7 @@ ENV PACKAGES_DIR=/packages
 ENV CHECK_SYSTEM=${CHECK_SYSTEM}
 ENV CHROME_DISABLE_GPU=${CHROME_DISABLE_GPU}
 ENV DEBUG=false
+ENV VERBOSE=false
 
 # Copy dummy packages
 COPY --from=builder ${PACKAGES_DIR} ${PACKAGES_DIR}
@@ -110,7 +114,7 @@ WORKDIR /app
 RUN apt-get update && apt install -y python3-opencv
 
 COPY . flare_bypasser
-RUN pip install git+https://github.com/
+RUN pip install --prefer-binary flare_bypasser/
 
 COPY rootfs /
 
