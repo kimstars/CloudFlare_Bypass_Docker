@@ -1,0 +1,22 @@
+services:
+  flare-bypasser :
+    build:
+      args:
+        #CHROME_VERSION: '131.'
+        UID: 1001
+        # CHROME_DISABLE_GPU: true
+        # CHECK_SYSTEM: true
+        # PYTHON_VERSION: 3.11
+      context: .
+      dockerfile: Dockerfile
+    #environment:
+    #  DEBUG: true
+    container_name: flare-bypasser
+    image: flare-bypasser:latest
+    ports:
+      - 20080:8080
+    #volumes:
+      #- ./var:/opt/flare_bypasser/var/
+      #< Uncomment if you persistent logs between runs
+      #- ./examples/custom_user_commands/:/opt/flare_bypasser/extensions/
+      #< Uncomment for run with extension example (/command/my-click uri)

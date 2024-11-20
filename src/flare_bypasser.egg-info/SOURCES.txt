@@ -1,0 +1,17 @@
+LICENSE
+README.md
+pyproject.toml
+setup.py
+src/flare_bypasser/__init__.py
+src/flare_bypasser/browser_wrapper.py
+src/flare_bypasser/example_command_processor.py
+src/flare_bypasser/flare_bypass_server.py
+src/flare_bypasser/flare_bypasser.py
+src/flare_bypasser/proxy_controller.py
+src/flare_bypasser.egg-info/PKG-INFO
+src/flare_bypasser.egg-info/SOURCES.txt
+src/flare_bypasser.egg-info/dependency_links.txt
+src/flare_bypasser.egg-info/entry_points.txt
+src/flare_bypasser.egg-info/requires.txt
+src/flare_bypasser.egg-info/top_level.txt
+src/tests/unit_tests/proxy_controller_test.py

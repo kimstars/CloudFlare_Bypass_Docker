@@ -1,0 +1,2 @@
+[console_scripts]
+flare_bypass_server = flare_bypasser:server_run
